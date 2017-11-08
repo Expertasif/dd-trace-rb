@@ -10,6 +10,7 @@ module Datadog
   # spent on a distributed call on a separate machine, or the time spent in a small component
   # within a larger operation. Spans can be nested within each other, and in those instances
   # will have a parent-child relationship.
+  # rubocop:disable Metrics/ClassLength
   class Span
     # The max value for a \Span identifier.
     # Span and trace identifiers should be strictly positive and strictly inferior to this limit.
@@ -163,6 +164,19 @@ module Datadog
         @sampled = parent.sampled
         @sampling_priority = parent.sampling_priority
       end
+    end
+
+    # Return all parent_ids for this span. It won't report the parent id
+    # of the root span if it has a parent from distributed tracing. It only
+    # reports local parents, on spans created within the same context.
+    def parent_ids
+      ids = []
+      s = self
+      while s.parent
+        s = s.parent
+        ids << s.span_id
+      end
+      ids
     end
 
     # Return the hash representation of the current span.

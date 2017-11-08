@@ -288,9 +288,12 @@ module Datadog
     def record(context)
       context = context.context if context.is_a?(Datadog::Span)
       return if context.nil?
-      trace, sampled = context.get
-      ready = !trace.nil? && !trace.empty? && sampled
-      write(trace) if ready
+      loop do
+        trace, sampled = context.get
+        break unless trace
+        ready = !trace.empty? && sampled
+        write(trace) if ready
+      end
     end
 
     # Return the current active span or +nil+.
