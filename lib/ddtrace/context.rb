@@ -13,19 +13,28 @@ module Datadog
   # \Context, it will be related to the original trace.
   #
   # This data structure is thread-safe.
+  # rubocop:disable Metrics/ClassLength
   class Context
-    DEFAULT_MAX_SPANS_PER_TRACE_SOFT = 1000
-    DEFAULT_MAX_SPANS_PER_TRACE_HARD = 10000
+    # DEFAULT_MAX_SPANS_PER_TRACE_SOFT is the amount of spans collected before
+    # the context starts to partially flush parts of traces. With a setting of 10k,
+    # the memory overhead is about 10Mb per thread/context (depends on spans metadata,
+    # this is just an order of magnitude).
+    DEFAULT_MAX_SPANS_PER_TRACE_SOFT = 10_000
+    # DEFAULT_MAX_SPANS_PER_TRACE_HARD is the amount of spans above which, for a
+    # given trace, the context will simply drop and ignore spans, avoiding
+    # a high memory usage.
+    DEFAULT_MAX_SPANS_PER_TRACE_HARD = 100_000
+    # DEFAULT_MIN_SPANS_FOR_FLUSH_TIMEOUT is the minimum number of spans required
+    # for a partial flush to happen on a timeout. This is to prevent partial flush
+    # of traces which last a very long time but yet have few spans.
+    DEFAULT_MIN_SPANS_FOR_FLUSH_TIMEOUT = 100
+    # DEFAULT_PARTIAL_FLUSH_TIMEOUT is the limit (in seconds) above which the context
+    # considers flushing parts of the trace. Partial flushes should not be done too
+    # late else the agent rejects them with a "too far in the past" error.
     DEFAULT_PARTIAL_FLUSH_TIMEOUT = 10
 
     # Initialize a new thread-safe \Context.
     def initialize(options = {})
-      @max_spans_per_trace_soft = options.fetch(:max_spans_per_trace_soft,
-                                                Datadog::Context::DEFAULT_MAX_SPANS_PER_TRACE_SOFT)
-      @max_spans_per_trace_hard = options.fetch(:max_spans_per_trace_hard,
-                                                Datadog::Context::DEFAULT_MAX_SPANS_PER_TRACE_HARD)
-      @partial_flush_timeout = options.fetch(:partial_flush_timeout,
-                                             Datadog::Context::DEFAULT_PARTIAL_FLUSH_TIMEOUT)
       @mutex = Mutex.new
       reset
     end
@@ -230,9 +239,9 @@ module Datadog
         # By doing this, we send partial information on the server and take the risk
         # to split a trace which could have been totally in-memory.
         # OTOH the backend will collect these and put them together.
-        # Traces which are not even at 10% of the limit are never splitted,
+        # Traces which do not have enough spans will not be touched
         # to avoid slicing small things too often.
-        unless trace.length <= @max_spans_per_trace_soft / 10 ||
+        unless trace.length <= @min_spans_for_flush_timeout ||
                trace[0].start_time.nil? ||
                trace[0].start_time > Time.now.utc - @partial_flush_timeout
           partial_flush()
