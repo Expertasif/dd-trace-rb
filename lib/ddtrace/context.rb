@@ -179,7 +179,6 @@ module Datadog
       roots, marked_ids = partial_roots()
       return nil unless roots
 
-      return unless roots
       roots_spans = Hash[roots.map { |id| [id, []] }]
       unfinished = {}
       @trace.each do |span|
