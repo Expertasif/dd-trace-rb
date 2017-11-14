@@ -168,14 +168,14 @@ module Datadog
     def partial_roots
       return nil unless @current_span
 
-      marked_ids = Hash[([@current_span.span_id] + @current_span.parent_ids).map { |id| [id, true] }]
+      marked_ids = ([@current_span.span_id] + @current_span.parent_ids).to_set
       roots = []
       @trace.each do |span|
         # Skip if span is one of the parents of the current span.
-        next if marked_ids.key? span.span_id
+        next if marked_ids.include? span.span_id
         # Skip if the span is not one of the parents of the current span,
         # and its parent is not either. It means it just can't be a local, partial root.
-        next unless marked_ids.key? span.parent_id
+        next unless marked_ids.include? span.parent_id
 
         roots << span.span_id
       end
@@ -192,7 +192,7 @@ module Datadog
       unfinished = {}
       @trace.each do |span|
         ids = [span.span_id] + span.parent_ids()
-        ids.reject! { |id| marked_ids.key? id }
+        ids.reject! { |id| marked_ids.include? id }
         ids.each do |id|
           if roots_spans.key?(id)
             unfinished[id] = true unless span.finished?

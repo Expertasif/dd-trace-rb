@@ -298,7 +298,7 @@ class ContextTest < Minitest::Test
 
         partial_roots, marked_ids = tracer.call_context.partial_roots
         assert_equal([child1_id], partial_roots)
-        assert_equal({ root_id => true, child3_id => true }, marked_ids)
+        assert_equal([root_id, child3_id].to_set, marked_ids)
         partial_roots_spans = tracer.call_context.partial_roots_spans
         assert_includes(partial_roots_spans, child1_id)
       end
@@ -346,7 +346,7 @@ class ContextTest < Minitest::Test
 
         partial_roots, marked_ids = ctx.partial_roots
         assert_equal([], partial_roots)
-        assert_equal({ root_id => true, child3_id => true }, marked_ids)
+        assert_equal([root_id, child3_id].to_set, marked_ids)
         partial_roots_spans = ctx.partial_roots_spans
         assert_nil(partial_roots_spans)
 
@@ -403,7 +403,7 @@ class ContextTest < Minitest::Test
 
       partial_roots, marked_ids = ctx.partial_roots
       assert_equal(roots_ids[0...(n / 2 - 1)], partial_roots, 'all children but one appear in partial roots')
-      assert_equal({ root_id => true }, marked_ids, 'only root is marked, everything else is flushable')
+      assert_equal([root_id].to_set, marked_ids, 'only root is marked, everything else is flushable')
       partial_roots_spans = ctx.partial_roots_spans
       assert_equal((n / 2 - 1), partial_roots_spans.length)
     end
