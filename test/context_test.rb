@@ -304,9 +304,9 @@ class ContextTest < Minitest::Test
     ctx.add_span(span)
 
     action = MiniTest::Mock.new
-    action.expect(:nop, nil, ['test.op'])
+    action.expect(:call_with_name, nil, ['test.op'])
     ctx.each_span do |s|
-      action.nop(s.name)
+      action.call_with_name(s.name)
     end
     action.verify
   end
@@ -316,14 +316,14 @@ class ContextTest < Minitest::Test
     ctx = tracer.call_context
 
     action = MiniTest::Mock.new
-    action.expect(:nop, nil, ['test.op2'])
+    action.expect(:call_with_name, nil, ['test.op2'])
     tracer.trace('test.op1') do
       tracer.trace('test.op2') do
         assert_equal(2, ctx.length)
         ctx.delete_span_if { |span| span.name == 'test.op1' }
         assert_equal(1, ctx.length)
         ctx.each_span do |s|
-          action.nop(s.name)
+          action.call_with_name(s.name)
         end
         assert_equal(false, ctx.finished?, 'context is not finished as op2 is not finished')
         tracer.trace('test.op3') do

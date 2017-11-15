@@ -107,9 +107,12 @@ module Datadog
     def each_partial_trace(context)
       start_time = context.start_time
       length = context.length
+      # Stop and do not flush anything if there are not enough spans.
       return if length < @min_spans_before_partial_flush
+      # If there are enough spans, but not too many, check for start time.
       return if length < @max_spans_before_partial_flush &&
                 start_time && start_time > Time.now.utc - @partial_flush_timeout
+      # Here, either the trace is old or we have too many spans, flush it.
       traces = partial_flush(context)
       return unless traces
       traces.each do |trace|

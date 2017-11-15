@@ -203,7 +203,12 @@ module Datadog
           finished = span.finished?
           delete_span = yield span
           if delete_span
+            # We need to detach the span from the context, else, some code
+            # finishing it afterwards would mess up with the number of
+            # finished_spans and possibly cause other side effects.
             span.context = nil
+            # Acknowledge there's one span less to finish, if needed.
+            # It's very important to keep this balanced.
             @finished_spans -= 1 if finished
           end
           delete_span
