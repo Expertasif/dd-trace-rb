@@ -336,6 +336,33 @@ class ContextTest < Minitest::Test
     end
     action.verify
   end
+
+  def test_max_length
+    tracer = get_test_tracer
+
+    ctx = Datadog::Context.new
+    assert_equal(Datadog::Context::DEFAULT_MAX_LENGTH, ctx.max_length)
+
+    max_length = 3
+    ctx = Datadog::Context.new(max_length: max_length)
+    assert_equal(max_length, ctx.max_length)
+
+    spans = []
+    (max_length * 2).times do |i|
+      span = Datadog::Span.new(nil, "test.op#{i}")
+      spans << span
+      tracer.start_span(span, child_of: ctx)
+    end
+
+    assert_equal(max_length, ctx.length)
+    trace, = ctx.get
+    assert_nil(trace)
+
+    spans.each(&:finish)
+
+    # [FIXME:christian] test below fails...
+    assert_equal(0, ctx.length, "context #{ctx}")
+  end
 end
 
 class ThreadLocalContextTest < Minitest::Test

@@ -90,11 +90,10 @@ module Datadog
         # as it means despite the soft limit, the hard limit is reached, so the trace
         # by default has 10000 spans, all of which belong to unfinished parts of a
         # larger trace. This is a catch-all to reduce global memory usage.
-        if @max_length > 0 && @trace.length >= (@max_length - 1)
+        if @max_length > 0 && @trace.length >= @max_length
           Datadog::Tracer.log.debug("context full, ignoring span #{span.name}")
-          # This span is going to be finished at some point, but will never increase
-          # the trace size, so we acknowledge this fact, to avoid to send it to early.
-          @finished_spans -= 1
+          # Detach the span from any context, it's being dropped and ignored.
+          span.context = nil
           return
         end
         set_current_span(span)

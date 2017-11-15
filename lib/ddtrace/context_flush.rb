@@ -7,9 +7,9 @@ module Datadog
   # It performs memory flushes when required.
   class ContextFlush
     # by default, soft and hard limits are the same
-    DEFAULT_MAX_SPANS_BEFORE_PARTIAL_FLUSH = Datadog::Context::DEFAULT_MAX_LENGTH
+    DEFAULT_MAX_SPANS_BEFORE_PARTIAL_FLUSH = Datadog::Context::DEFAULT_MAX_LENGTH + 1
     # by default, never do a partial flush
-    DEFAULT_MIN_SPANS_BEFORE_PARTIAL_FLUSH = Datadog::Context::DEFAULT_MAX_LENGTH
+    DEFAULT_MIN_SPANS_BEFORE_PARTIAL_FLUSH = Datadog::Context::DEFAULT_MAX_LENGTH + 1
     # timeout should be lower than the trace agent window
     DEFAULT_PARTIAL_FLUSH_TIMEOUT = 10
 
