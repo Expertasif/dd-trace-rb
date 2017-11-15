@@ -15,17 +15,17 @@ module Datadog
   # This data structure is thread-safe.
   class Context
     # 100k spans is about a 100Mb footprint
-    DEFAULT_MAX_SPANS = 100_000
+    DEFAULT_MAX_LENGTH = 100_000
+
+    attr_reader :max_length
 
     # Initialize a new thread-safe \Context.
     def initialize(options = {})
       @mutex = Mutex.new
-      # max_spans is the amount of spans above which, for a
-      # given trace, the context will simply drop and ignore spans, avoiding
-      # a high memory usage.
-      @max_spans = options.fetch(:max_spans,
-                                 DEFAULT_MAX_SPANS)
-      reset
+      # max_length is the amount of spans above which, for a given trace,
+      # the context will simply drop and ignore spans, avoiding high memory usage.
+      @max_length = options.fetch(:max_length, DEFAULT_MAX_LENGTH)
+      reset(options)
     end
 
     def reset(options = {})
@@ -90,7 +90,7 @@ module Datadog
         # as it means despite the soft limit, the hard limit is reached, so the trace
         # by default has 10000 spans, all of which belong to unfinished parts of a
         # larger trace. This is a catch-all to reduce global memory usage.
-        if @max_spans > 0 && @trace.length >= (@max_spans - 1)
+        if @max_length > 0 && @trace.length >= (@max_length - 1)
           Datadog::Tracer.log.debug("context full, ignoring span #{span.name}")
           # This span is going to be finished at some point, but will never increase
           # the trace size, so we acknowledge this fact, to avoid to send it to early.
