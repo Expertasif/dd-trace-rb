@@ -5,6 +5,7 @@ require 'pathname'
 
 require 'ddtrace/span'
 require 'ddtrace/context'
+require 'ddtrace/context_flush'
 require 'ddtrace/provider'
 require 'ddtrace/logger'
 require 'ddtrace/writer'
@@ -96,6 +97,8 @@ module Datadog
 
       @provider = options.fetch(:context_provider, Datadog::DefaultContextProvider.new)
       @provider ||= Datadog::DefaultContextProvider.new # @provider should never be nil
+
+      @context_flush = Datadog::ContextFlush.new(options)
 
       @mutex = Mutex.new
       @services = {}
@@ -288,11 +291,15 @@ module Datadog
     def record(context)
       context = context.context if context.is_a?(Datadog::Span)
       return if context.nil?
-      loop do
-        trace, sampled = context.get
-        break unless trace
-        ready = !trace.empty? && sampled
-        write(trace) if ready
+      trace, sampled = context.get
+      if sampled
+        if trace.empty?
+          @context_flush.each_partial_trace do |t|
+            write(t)
+          end
+        else
+          write(trace)
+        end
       end
     end
 

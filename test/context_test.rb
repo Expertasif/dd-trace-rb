@@ -1,17 +1,6 @@
 require 'helper'
 require 'ddtrace/tracer'
 
-module Datadog
-  class Context
-    attr_accessor :max_spans_per_trace_soft
-    attr_accessor :max_spans_per_trace_hard
-    attr_accessor :partial_flush_timeout
-
-    public :partial_roots
-    public :partial_roots_spans
-  end
-end
-
 # rubocop:disable Metrics/ClassLength
 class ContextTest < Minitest::Test
   def test_nil_tracer
@@ -279,138 +268,73 @@ class ContextTest < Minitest::Test
     assert_equal(false, ctx.sampled)
   end
 
-  def test_partial_roots_typical
+  def test_length
     tracer = get_test_tracer
-    root_id = nil
-    child1_id = nil
-    child2_id = nil
-    child3_id = nil
-    tracer.trace('root') do |root|
-      root_id = root.span_id
-      tracer.trace('child1') do |child1|
-        child1_id = child1.span_id
-        tracer.trace('child2') do |child2|
-          child2_id = child2.span_id
-        end
-      end
-      tracer.trace('child3') do |child3|
-        child3_id = child3.span_id
+    ctx = Datadog::Context.new
 
-        partial_roots, marked_ids = tracer.call_context.partial_roots
-        assert_equal([child1_id], partial_roots)
-        assert_equal([root_id, child3_id].to_set, marked_ids)
-        partial_roots_spans = tracer.call_context.partial_roots_spans
-        assert_includes(partial_roots_spans, child1_id)
-      end
+    assert_equal(0, ctx.length)
+    10.times do |i|
+      span = Datadog::Span.new(tracer, "test.op#{i}")
+      assert_equal(i, ctx.length)
+      ctx.add_span(span)
+      assert_equal(i + 1, ctx.length)
+      ctx.close_span(span)
+      assert_equal(i + 1, ctx.length)
     end
-  end
 
-  def test_partial_roots_empty
-    tracer = get_test_tracer
-    partial_roots, marked_ids = tracer.call_context.partial_roots
-    assert_nil(partial_roots)
-    assert_nil(marked_ids)
-    partial_roots_spans = tracer.call_context.partial_roots_spans
-    assert_nil(partial_roots_spans)
-  end
-
-  # rubocop:disable Metrics/AbcSize
-  def test_partial_flush_soft
-    tracer = get_test_tracer
-    root_id = nil
-    child3_id = nil
-    n = 10
-    roots_ids = []
-    spans_ids = []
-    tracer.trace('root') do |root|
-      ctx = tracer.call_context
-      ctx.get
-
-      ctx.max_spans_per_trace_soft = n + 2 # +1 for root span, +1 for child3
-      ctx.max_spans_per_trace_hard = ctx.max_spans_per_trace_soft + 1 # make sure hard is higher than soft
-      ctx.partial_flush_timeout = 3600 # disable timeout flushes
-
-      root_id = root.span_id
-      (n / 2).times do
-        tracer.trace('child') do |child|
-          child1_id = child.span_id
-          tracer.trace('child2') do |child2|
-            child2_id = child2.span_id
-            roots_ids << child1_id
-            spans_ids << { child1: child1_id, chilld2: child2_id }
-          end
-        end
-      end
-      tracer.trace('child3') do |child3|
-        child3_id = child3.span_id
-
-        partial_roots, marked_ids = ctx.partial_roots
-        assert_equal([], partial_roots)
-        assert_equal([root_id, child3_id].to_set, marked_ids)
-        partial_roots_spans = ctx.partial_roots_spans
-        assert_nil(partial_roots_spans)
-
-        (n / 2).times do
-          trace, sampled = ctx.get
-          assert_equal(2, trace.length)
-          assert_equal(true, sampled)
-          assert_includes(roots_ids, trace[0].span_id)
-          assert_equal(root_id, trace[0].parent_id)
-          assert_equal(trace[0].span_id, trace[1].parent_id)
-          assert_equal(root.trace_id, trace[0].trace_id)
-          assert_equal(root.trace_id, trace[1].trace_id)
-        end
-        trace, sampled = ctx.get
-        assert_nil(trace)
-        assert_nil(sampled)
-      end
-    end
-  end
-
-  def test_partial_flush_hard
-    tracer = get_test_tracer
-    root_id = nil
-    n = 10
-    roots_ids = []
-    spans_ids = []
-    ctx = nil
-
-    ctx = tracer.call_context
     ctx.get
 
-    root = Datadog::Span.new(tracer, 'root')
-    ctx.add_span(root)
+    assert_equal(0, ctx.length)
+  end
 
-    ctx.max_spans_per_trace_soft = n
-    ctx.max_spans_per_trace_hard = ctx.max_spans_per_trace_soft # hard limit shadows soft limit
-    ctx.partial_flush_timeout = 3600 # disable timeout flushes
+  def test_start_time
+    tracer = get_test_tracer
+    ctx = tracer.call_context
 
-    root_id = root.span_id
-    (n / 2).times do
-      tracer.trace('child') do |child|
-        child1_id = child.span_id
-        tracer.trace('child2') do |child2|
-          child2_id = child2.span_id
-          roots_ids << child1_id
-          spans_ids << { child1: child1_id, chilld2: child2_id }
+    assert_nil(ctx.start_time)
+    tracer.trace('test.op') do |span|
+      assert_equal(span.start_time, ctx.start_time)
+    end
+    assert_nil(ctx.start_time)
+  end
+
+  def test_each_span
+    span = Datadog::Span.new(nil, 'test.op')
+    ctx = Datadog::Context.new
+    ctx.add_span(span)
+
+    action = MiniTest::Mock.new
+    action.expect(:nop, nil, ['test.op'])
+    ctx.each_span do |s|
+      action.nop(s.name)
+    end
+    action.verify
+  end
+
+  def test_delete_span_if
+    tracer = get_test_tracer
+    ctx = tracer.call_context
+
+    action = MiniTest::Mock.new
+    action.expect(:nop, nil, ['test.op2'])
+    tracer.trace('test.op1') do
+      tracer.trace('test.op2') do
+        assert_equal(2, ctx.length)
+        ctx.delete_span_if { |span| span.name == 'test.op1' }
+        assert_equal(1, ctx.length)
+        ctx.each_span do |s|
+          action.nop(s.name)
         end
+        assert_equal(false, ctx.finished?, 'context is not finished as op2 is not finished')
+        tracer.trace('test.op3') do
+        end
+        assert_equal(2, ctx.length)
+        ctx.delete_span_if { |span| span.name == 'test.op3' }
+        assert_equal(1, ctx.length)
       end
+      assert_equal(0, ctx.length, 'op2 has been finished, so context has been finished too')
     end
-    tracer.trace('child3') do
-      # child3 should be dropped and never show up.
-      # Even more, the latest span of the 'child' serie should not show up,
-      # because starting at n-1, we should drop everything.
-
-      partial_roots, marked_ids = ctx.partial_roots
-      assert_equal(roots_ids[0...(n / 2 - 1)], partial_roots, 'all children but one appear in partial roots')
-      assert_equal([root_id].to_set, marked_ids, 'only root is marked, everything else is flushable')
-      partial_roots_spans = ctx.partial_roots_spans
-      assert_equal((n / 2 - 1), partial_roots_spans.length)
-    end
-    ctx.close_span(root)
-    trace, sampled = ctx.get
-    assert_equal(n - 1, trace.length, 'trace should be completely sent, and its size n-1')
-    assert_equal(true, sampled)
+    action.verify
   end
 end
 
