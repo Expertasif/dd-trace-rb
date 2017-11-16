@@ -37,65 +37,68 @@ module Datadog
       @partial_traces = []
     end
 
-    # Returns ids of all spans which can be considered as local, partial roots
-    # from a partial flush perspective. Also returns the span IDs which have
-    # been marked as non flushable, and which should be kept.
-    def partial_roots(context)
-      # Here it's not totally atomic since current_span could change after it's queried.
-      # Worse case: it's held back and not flushed, but it's safe since in that case
-      # partial flushing is only "not efficient enought" but never flushes non legit spans.
-      current_span = context.current_span
-      return nil unless current_span
+    def add_children(m, spans, ids, leaf)
+      spans << leaf
+      ids.add(leaf.span_id)
 
-      marked_ids = ([current_span.span_id] + current_span.parent_ids).to_set
-      roots = []
-      context.each_span do |span|
-        # Skip if span is one of the parents of the current span.
-        next if marked_ids.include? span.span_id
-        # Skip if the span is not one of the parents of the current span,
-        # and its parent is not either. It means it just can't be a local, partial root.
-        next unless marked_ids.include? span.parent_id
-
-        roots << span.span_id
+      if m[leaf.span_id]
+        m[leaf.span_id].each do |sub|
+          add_children(m, spans, ids, sub)
+        end
       end
-      [roots, marked_ids]
     end
 
-    # Return a hash containting all sub traces which are candidates for
-    # a partial flush.
-    def partial_roots_spans(context)
-      roots, marked_ids = partial_roots(context)
-      return nil unless roots
+    def partial_traces(context)
+      # 1st step, taint all parents of an unfinished span as unflushable
+      unflushable_ids = Set.new
 
-      roots_spans = Hash[roots.map { |id| [id, []] }]
-      unfinished = Set.new
       context.each_span do |span|
-        ids = [span.span_id] + span.parent_ids()
-        ids.delete_if { |id| marked_ids.include? id }
-        ids.each do |id|
-          if roots_spans.include?(id)
-            unfinished[id] = true unless span.finished?
-            roots_spans[id] << span
+        next if span.finished? || unflushable_ids.include?(span.span_id)
+        unflushable_ids.add span.span_id
+        while span.parent
+          span = span.parent
+          unflushable_ids.add span.span_id
+        end
+      end
+
+      # 2nd step, find all spans which are at the border between flushable and unflushable
+      # Along the road, collect a reverse-tree which allows direct walking from parents to
+      # children but only for the ones we're interested it.
+      roots = []
+      children_map = {}
+      context.each_span do |span|
+        # There's no point in trying to put the real root in those partial roots, if
+        # it's flushable, the default algorithm would figure way more quickly.
+        if span.parent && !unflushable_ids.include?(span.span_id)
+          if unflushable_ids.include?(span.parent.span_id)
+            # span is flushable but is parent is not
+            roots << span
+          else
+            # span is flushable and its parent is too, build the reverse
+            # parent to child map for this one, it will be useful
+            children_map[span.parent.span_id] ||= []
+            children_map[span.parent.span_id] << span
           end
         end
       end
-      # Do not flush unfinished traces.
-      roots_spans.delete_if { |id| unfinished.include? id }
-      return nil if roots_spans.empty?
-      roots_spans
+
+      # 3rd step, find all children, as this can be costly, only perform it for partial roots
+      partial_traces = []
+      all_ids = Set.new
+      roots.each do |root|
+        spans = []
+        add_children(children_map, spans, all_ids, root)
+        partial_traces << spans
+      end
+
+      return [nil, nil] if partial_traces.empty?
+      [partial_traces, all_ids]
     end
 
     def partial_flush(context)
-      roots_spans = partial_roots_spans(context)
-      return nil unless roots_spans
+      traces, flushed_ids = partial_traces(context)
+      return nil unless traces && flushed_ids
 
-      traces = []
-      flushed_ids = {}
-      roots_spans.each_value do |spans|
-        next if spans.empty?
-        spans.each { |span| flushed_ids[span.span_id] = true }
-        traces << spans
-      end
       # We need to reject by span ID and not by value, because a span
       # value may be altered (typical example: it's finished by some other thread)
       # since we lock only the context, not all the spans which belong to it.
@@ -120,8 +123,8 @@ module Datadog
       end
     end
 
-    private :partial_roots
-    private :partial_roots_spans
+    private :add_children
+    private :partial_traces
     private :partial_flush
   end
 end

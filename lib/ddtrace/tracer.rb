@@ -293,7 +293,7 @@ module Datadog
       return if context.nil?
       trace, sampled = context.get
       if sampled
-        if trace.empty?
+        if trace.nil? || trace.empty?
           @context_flush.each_partial_trace do |t|
             write(t)
           end

@@ -156,7 +156,8 @@ module Datadog
         trace = @trace
         sampled = @sampled
 
-        return nil, nil unless check_finished_spans()
+        # still return sampled attribute, even if context is not finished
+        return nil, sampled unless check_finished_spans()
 
         reset
         [trace, sampled]

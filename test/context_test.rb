@@ -200,7 +200,7 @@ class ContextTest < Minitest::Test
     root.finish()
     lines = buf.string.lines
 
-    assert_equal(3, lines.length, 'there should be 3 log messages') if lines.respond_to? :length
+    assert_operator(3, :<=, lines.length, 'there should be at least 3 log messages') if lines.respond_to? :length
 
     # Test below iterates on lines, this is required for Ruby 1.9 backward compatibility.
     i = 0
@@ -349,9 +349,8 @@ class ContextTest < Minitest::Test
 
     spans = []
     (max_length * 2).times do |i|
-      span = Datadog::Span.new(nil, "test.op#{i}")
+      span = tracer.start_span("test.op#{i}", child_of: ctx)
       spans << span
-      tracer.start_span(span, child_of: ctx)
     end
 
     assert_equal(max_length, ctx.length)
@@ -360,7 +359,6 @@ class ContextTest < Minitest::Test
 
     spans.each(&:finish)
 
-    # [FIXME:christian] test below fails...
     assert_equal(0, ctx.length, "context #{ctx}")
   end
 end
