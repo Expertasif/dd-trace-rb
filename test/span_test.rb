@@ -1,7 +1,5 @@
 require 'helper'
 require 'ddtrace/span'
-
-# rubocop:disable Metrics/ClassLength
 class SpanTest < Minitest::Test
   def test_span_finish
     tracer = nil
@@ -172,22 +170,5 @@ BACKTRACE
     assert_equal('Something broke!', span.get_tag('error.msg'))
     assert_equal('RuntimeError', span.get_tag('error.type'))
     assert_equal(displayed_backtrace, span.get_tag('error.stack'))
-  end
-
-  def test_parent_ids
-    child = Datadog::Span.new(nil, 'test.child')
-    assert_equal([], child.parent_ids)
-
-    parent = Datadog::Span.new(nil, 'test.parent')
-    child.parent = parent
-    assert_equal([parent.span_id], child.parent_ids)
-    assert_equal([], parent.parent_ids)
-
-    grand_parent = Datadog::Span.new(nil, 'test.grand_parent')
-    parent.parent = grand_parent
-
-    assert_equal([parent.span_id, grand_parent.span_id], child.parent_ids)
-    assert_equal([grand_parent.span_id], parent.parent_ids)
-    assert_equal([], grand_parent.parent_ids)
   end
 end
