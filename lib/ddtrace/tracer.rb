@@ -120,12 +120,20 @@ module Datadog
       enabled = options.fetch(:enabled, nil)
       hostname = options.fetch(:hostname, nil)
       port = options.fetch(:port, nil)
+
+      # Those are rare "power-user" options.
       sampler = options.fetch(:sampler, nil)
+      max_spans_before_partial_flush = options.fetch(:max_spans_before_partial_flush, nil)
+      min_spans_before_partial_flush = options.fetch(:max_spans_before_partial_flush, nil)
+      partial_flush_timeout = options.fetch(:partial_flush_timeout, nil)
 
       @enabled = enabled unless enabled.nil?
       @writer.transport.hostname = hostname unless hostname.nil?
       @writer.transport.port = port unless port.nil?
       @sampler = sampler unless sampler.nil?
+      @context_flush = Datadog::ContextFlush.new(options) unless min_spans_before_partial_flush.nil? &&
+                                                                 max_spans_before_partial_flush.nil? &&
+                                                                 partial_flush_timeout.nil?
     end
 
     # Set the information about the given service. A valid example is:
@@ -294,7 +302,7 @@ module Datadog
       trace, sampled = context.get
       if sampled
         if trace.nil? || trace.empty?
-          @context_flush.each_partial_trace do |t|
+          @context_flush.each_partial_trace(context) do |t|
             write(t)
           end
         else

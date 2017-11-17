@@ -2,8 +2,8 @@ require 'helper'
 require 'ddtrace/tracer'
 require 'ddtrace/context_flush'
 
-class ContextFlushTest < Minitest::Test
-  def test_partial_flush_typical_not_enough_traces
+class ContextFlushEachTest < Minitest::Test
+  def test_each_partial_trace_typical_not_enough_traces
     tracer = get_test_tracer
     context_flush = Datadog::ContextFlush.new
     context = tracer.call_context
@@ -68,7 +68,7 @@ class ContextFlushTest < Minitest::Test
     assert_equal(0, context.length, 'everything should be written by now')
   end
 
-  def test_partial_flush_typical
+  def test_each_partial_trace_typical
     tracer = get_test_tracer
     context_flush = Datadog::ContextFlush.new(min_spans_before_partial_flush: 1,
                                               max_spans_before_partial_flush: 1)
@@ -136,7 +136,7 @@ class ContextFlushTest < Minitest::Test
   end
 
   # rubocop:disable Metrics/MethodLength
-  def test_partial_flush_mixed
+  def test_each_partial_trace_mixed
     tracer = get_test_tracer
     context_flush = Datadog::ContextFlush.new(min_spans_before_partial_flush: 1,
                                               max_spans_before_partial_flush: 1)
@@ -254,5 +254,123 @@ class ContextFlushTest < Minitest::Test
     end
 
     assert_equal(0, context.length, 'everything should be written by now')
+  end
+end
+
+module Datadog
+  class Tracer
+    attr_accessor :context_flush
+  end
+end
+
+class ContextFlushPartialTest < Minitest::Test
+  MIN_SPANS = 10
+  MAX_SPANS = 100
+  TIMEOUT = 60 # make this very high to reduce test flakiness (1 minute here)
+
+  def get_context_flush
+    Datadog::ContextFlush.new(min_spans_before_partial_flush: MIN_SPANS,
+                              max_spans_before_partial_flush: MAX_SPANS,
+                              partial_flush_timeout: TIMEOUT)
+  end
+
+  # rubocop:disable Metrics/AbcSize
+  def test_partial_caterpillar
+    tracer = get_test_tracer
+    context_flush = get_context_flush
+    tracer.context_flush = context_flush
+
+    write1 = Minitest::Mock.new
+    expected = []
+    MIN_SPANS.times do |i|
+      expected << "a.#{i}"
+    end
+    (MAX_SPANS - MIN_SPANS).times do |i|
+      expected << "b.#{i}"
+    end
+    # We need to sort the values the same way the values will be output by the test transport
+    expected.sort!
+    expected.each do |e|
+      write1.expect(:call_with_name, nil, [e])
+    end
+
+    write2 = Minitest::Mock.new
+    expected = ['root']
+    MIN_SPANS.times do |i|
+      expected << "b.#{i + MAX_SPANS - MIN_SPANS}"
+    end
+    # We need to sort the values the same way the values will be output by the test transport
+    expected.sort!
+    expected.each do |e|
+      write2.expect(:call_with_name, nil, [e])
+    end
+
+    tracer.trace('root') do
+      MIN_SPANS.times do |i|
+        tracer.trace("a.#{i}") do
+        end
+      end
+      spans = tracer.writer.spans()
+      assert_equal(0, spans.length, 'nothing should be flushed, as max limit is not reached')
+      MAX_SPANS.times do |i|
+        tracer.trace("b.#{i}") do
+        end
+      end
+      spans = tracer.writer.spans()
+      # Let's explain the extra span here, what should happen is:
+      # - root span is started
+      # - then 99 spans (10 from 1st batch, 89 from second batch) are put in context
+      # - then the 101th comes (the 90th from the second batch) and triggers a flush of everything but root span
+      # - then the last 10 spans from second batch are thrown in, so that's 10 left + the root span
+      assert_equal(1 + MIN_SPANS, tracer.call_context.length, 'some spans should have been sent')
+      assert_equal(MAX_SPANS, spans.length)
+      spans.each do |span|
+        write1.call_with_name(span.name)
+      end
+      write1.verify
+    end
+
+    spans = tracer.writer.spans()
+    assert_equal(MIN_SPANS + 1, spans.length)
+    spans.each do |span|
+      write2.call_with_name(span.name)
+    end
+    write2.verify
+  end
+
+  # Test the tracer configure args which are forwarded to context flush only.
+  def test_tracer_configure
+    tracer = get_test_tracer
+
+    old_context_flush = tracer.context_flush
+    tracer.configure()
+    assert_equal(old_context_flush, tracer.context_flush, 'the same context_flush should be reused')
+
+    tracer.configure(min_spans_before_partial_flush: 3,
+                     max_spans_before_partial_flush: 3)
+
+    refute_equal(old_context_flush, tracer.context_flush, 'another context_flush should be have been created')
+  end
+
+  def test_tracer_hard_limit_overrides_soft_limit
+    tracer = get_test_tracer
+
+    context = tracer.call_context
+    tracer.configure(min_spans_before_partial_flush: context.max_length,
+                     max_spans_before_partial_flush: context.max_length,
+                     partial_flush_timeout: 3600)
+
+    n = 1_000_000
+    assert_operator(n, :>, context.max_length, 'need to send enough spans')
+    tracer.trace('root') do
+      n.times do |_i|
+        tracer.trace('span.${i}') do
+        end
+        spans = tracer.writer.spans()
+        assert_equal(0, spans.length, 'nothing should be written, soft limit is inhibited')
+      end
+    end
+    spans = tracer.writer.spans()
+    assert_equal(context.max_length, spans.length, 'size should be capped to hard limit')
   end
 end
