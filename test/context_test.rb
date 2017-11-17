@@ -175,6 +175,7 @@ class ContextTest < Minitest::Test
     tracer = get_test_tracer
 
     default_log = Datadog::Tracer.log
+    default_level = Datadog::Tracer.log.level
 
     buf = StringIO.new
 
@@ -226,6 +227,7 @@ class ContextTest < Minitest::Test
     end
 
     Datadog::Tracer.log = default_log
+    Datadog::Tracer.log.level = default_level
   end
 
   def test_thread_safe
